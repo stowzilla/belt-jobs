@@ -20,8 +20,44 @@ jobs:
           VERSION=$(ruby -e "require './lib/belt/jobs/version'; puts Belt::Jobs::VERSION")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Check if gem version is published
+        id: gem
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            "https://rubygems.org/api/v2/rubygems/belt-jobs/versions/${VERSION}.json")
+          case "$status" in
+            200) echo "published=true" >> "$GITHUB_OUTPUT" ;;
+            404) echo "published=false" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::RubyGems version check returned HTTP ${status}"
+              exit 1
+              ;;
+          esac
+      - name: Validate RubyGems API key
+        if: steps.gem.outputs.published == 'false'
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: |
+          if [ -z "$GEM_HOST_API_KEY" ]; then
+            echo "::error::RUBYGEMS_API_KEY is not configured as a repository Actions secret"
+            exit 1
+          fi
+      - uses: ruby/setup-ruby@v1
+        if: steps.gem.outputs.published == 'false'
+        with:
+          ruby-version: '3.4'
+      - name: Build gem
+        if: steps.gem.outputs.published == 'false'
+        run: gem build belt-jobs.gemspec
+      - name: Push to RubyGems
+        if: steps.gem.outputs.published == 'false'
+        run: gem push belt-jobs-*.gem
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
       - name: Check if tag exists
-        id: check
+        id: tag
         run: |
           if git ls-remote --tags origin | grep -q "refs/tags/${{ steps.version.outputs.tag }}$"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -29,24 +65,11 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Create tag
-        if: steps.check.outputs.exists == 'false'
+        if: steps.tag.outputs.exists == 'false'
         run: |
           git tag "${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
-      - uses: ruby/setup-ruby@v1
-        if: steps.check.outputs.exists == 'false'
-        with:
-          ruby-version: '3.4'
-      - name: Build gem
-        if: steps.check.outputs.exists == 'false'
-        run: gem build belt-jobs.gemspec
-      - name: Push to RubyGems
-        if: steps.check.outputs.exists == 'false'
-        run: gem push belt-jobs-*.gem
-        env:
-          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-      - name: Create GitHub Release
-        if: steps.check.outputs.exists == 'false'
+      - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
