@@ -1,0 +1,45 @@
+variable "app_name" {
+  description = "Belt application name"
+  type        = string
+}
+
+variable "environment" {
+  description = "Deployment environment"
+  type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "recurring_config_path" {
+  description = "Path to config/recurring.yml"
+  type        = string
+  default     = ""
+}
+
+variable "visibility_timeout_seconds" {
+  description = "SQS visibility timeout; six times the 900-second Lambda timeout by default"
+  type        = number
+  default     = 5400
+}
+
+variable "message_retention_seconds" {
+  description = "How long unprocessed jobs remain on the queue"
+  type        = number
+  default     = 345600
+}
+
+variable "max_receive_count" {
+  description = "Unhandled executions before a job moves to the DLQ"
+  type        = number
+  default     = 5
+}
+
+variable "alarm_topic_arn" {
+  description = "Optional SNS topic for jobs DLQ alarms"
+  type        = string
+  default     = ""
+}

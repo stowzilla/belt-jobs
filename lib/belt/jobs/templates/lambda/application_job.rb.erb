@@ -1,0 +1,8 @@
+# frozen_string_literal: true
+
+require 'belt-jobs'
+
+Belt::Jobs.configure_active_job!
+
+class ApplicationJob < ActiveJob::Base
+end

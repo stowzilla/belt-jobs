@@ -1,0 +1,143 @@
+data "aws_caller_identity" "current" {}
+locals {
+  name_prefix           = "${var.app_name}-${var.environment}-jobs"
+  recurring_config_path = var.recurring_config_path != "" ? var.recurring_config_path : "${path.module}/../../../config/recurring.yml"
+  recurring_jobs_raw    = fileexists(local.recurring_config_path) ? yamldecode(file(local.recurring_config_path)) : {}
+  recurring_jobs = {
+    for name, job in coalesce(local.recurring_jobs_raw, {}) : name => job
+    if try(job.enabled, true)
+  }
+  alarm_actions = var.alarm_topic_arn == "" ? [] : [var.alarm_topic_arn]
+}
+
+resource "aws_sqs_queue" "dead_letter" {
+  name                      = "${local.name_prefix}-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+}
+
+resource "aws_sqs_queue" "jobs" {
+  name                       = local.name_prefix
+  visibility_timeout_seconds = var.visibility_timeout_seconds
+  message_retention_seconds  = var.message_retention_seconds
+  sqs_managed_sse_enabled    = true
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.dead_letter.arn
+    maxReceiveCount     = var.max_receive_count
+  })
+}
+
+resource "aws_sqs_queue" "scheduler_dead_letter" {
+  name                      = "${local.name_prefix}-scheduler-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+}
+
+resource "aws_scheduler_schedule_group" "jobs" {
+  name = local.name_prefix
+}
+
+resource "aws_iam_role" "scheduler" {
+  name = "${local.name_prefix}-scheduler"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "scheduler.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "scheduler" {
+  name = "send-jobs"
+  role = aws_iam_role.scheduler.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["sqs:SendMessage"]
+      Resource = [aws_sqs_queue.jobs.arn, aws_sqs_queue.scheduler_dead_letter.arn]
+    }]
+  })
+}
+
+resource "aws_iam_policy" "producer" {
+  name = "${local.name_prefix}-producer"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage"]
+        Resource = aws_sqs_queue.jobs.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["scheduler:CreateSchedule", "scheduler:DeleteSchedule", "scheduler:GetSchedule", "scheduler:UpdateSchedule"]
+        Resource = "arn:aws:scheduler:${var.aws_region}:${data.aws_caller_identity.current.account_id}:schedule/${aws_scheduler_schedule_group.jobs.name}/*"
+      },
+      {
+        Effect    = "Allow"
+        Action    = ["iam:PassRole"]
+        Resource  = aws_iam_role.scheduler.arn
+        Condition = { StringEquals = { "iam:PassedToService" = "scheduler.amazonaws.com" } }
+      }
+    ]
+  })
+}
+
+resource "aws_scheduler_schedule" "recurring" {
+  for_each = local.recurring_jobs
+
+  name                         = substr("${local.name_prefix}-${replace(each.key, "_", "-")}", 0, 64)
+  group_name                   = aws_scheduler_schedule_group.jobs.name
+  schedule_expression          = each.value.schedule
+  schedule_expression_timezone = try(each.value.timezone, "UTC")
+  state                        = try(each.value.enabled, true) ? "ENABLED" : "DISABLED"
+
+  flexible_time_window { mode = "OFF" }
+
+  target {
+    arn      = aws_sqs_queue.jobs.arn
+    role_arn = aws_iam_role.scheduler.arn
+    input = jsonencode({
+      belt_jobs = {
+        job_class = each.value.class
+        arguments = try(each.value.args, [])
+        queue     = try(each.value.queue, "default")
+      }
+    })
+    dead_letter_config { arn = aws_sqs_queue.scheduler_dead_letter.arn }
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "job_dlq" {
+  alarm_name          = "${local.name_prefix}-dlq-not-empty"
+  alarm_description   = "A Belt job exhausted its SQS retries"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  dimensions          = { QueueName = aws_sqs_queue.dead_letter.name }
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+}
+
+resource "aws_cloudwatch_metric_alarm" "scheduler_dlq" {
+  alarm_name          = "${local.name_prefix}-scheduler-dlq-not-empty"
+  alarm_description   = "EventBridge Scheduler could not deliver a Belt job"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  dimensions          = { QueueName = aws_sqs_queue.scheduler_dead_letter.name }
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+}

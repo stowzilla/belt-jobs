@@ -1,0 +1,26 @@
+AllCops:
+  NewCops: enable
+  SuggestExtensions: false
+  TargetRubyVersion: 3.3
+
+Naming/FileName:
+  Exclude:
+    - lib/belt-jobs.rb
+
+Style/Documentation:
+  Enabled: false
+
+Metrics/ClassLength:
+  Max: 230
+
+Metrics/MethodLength:
+  Max: 35
+
+Metrics/AbcSize:
+  Max: 35
+
+Metrics/CyclomaticComplexity:
+  Max: 15
+
+Metrics/PerceivedComplexity:
+  Max: 15

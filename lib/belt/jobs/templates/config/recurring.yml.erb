@@ -1,0 +1,12 @@
+# Recurring jobs are generated with:
+#   belt g job daily_digest --schedule "every day at 9am" --timezone America/New_York
+#
+# Or add entries directly using EventBridge cron(...) / rate(...) expressions:
+# daily_digest:
+#   class: DailyDigestJob
+#   args: []
+#   schedule: cron(0 9 * * ? *)
+#   timezone: America/New_York
+#   queue: default
+#   enabled: true
+{}

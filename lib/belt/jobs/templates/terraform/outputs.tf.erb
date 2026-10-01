@@ -1,0 +1,27 @@
+output "queue_url" {
+  value = aws_sqs_queue.jobs.url
+}
+
+output "queue_arn" {
+  value = aws_sqs_queue.jobs.arn
+}
+
+output "dead_letter_queue_arn" {
+  value = aws_sqs_queue.dead_letter.arn
+}
+
+output "scheduler_dlq_arn" {
+  value = aws_sqs_queue.scheduler_dead_letter.arn
+}
+
+output "scheduler_role_arn" {
+  value = aws_iam_role.scheduler.arn
+}
+
+output "schedule_group_name" {
+  value = aws_scheduler_schedule_group.jobs.name
+}
+
+output "producer_policy_arn" {
+  value = aws_iam_policy.producer.arn
+}

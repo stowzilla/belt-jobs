@@ -1,0 +1,21 @@
+default: &default
+  timeout: 900
+  memory_size: 512
+  env_vars:
+    BELT_JOBS_QUEUE_URL: ref(belt_jobs_queue_url)
+    BELT_JOBS_QUEUE_ARN: ref(belt_jobs_queue_arn)
+    BELT_JOBS_SCHEDULER_ROLE_ARN: ref(belt_jobs_scheduler_role_arn)
+    BELT_JOBS_SCHEDULER_DLQ_ARN: ref(belt_jobs_scheduler_dlq_arn)
+    BELT_JOBS_SCHEDULE_GROUP_NAME: ref(belt_jobs_schedule_group)
+  sqs_triggers:
+    - queue_arn: ref(belt_jobs_queue_arn)
+      batch_size: 10
+      maximum_batching_window_in_seconds: 1
+      maximum_concurrency: 10
+      report_batch_item_failures: true
+
+dev:
+  <<: *default
+
+prod:
+  <<: *default
